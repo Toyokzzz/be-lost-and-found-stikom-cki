@@ -8,13 +8,23 @@ import { config } from './config';
 
 export const app = express();
 
-// Middlewares
+// Middlewares — Izinkan semua origin untuk deployment Vercel
 app.use(
   cors({
-    origin: '*',
+    origin: true,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
+
+// Handle preflight OPTIONS request secara eksplisit
+app.options('*', cors({
+  origin: true,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
