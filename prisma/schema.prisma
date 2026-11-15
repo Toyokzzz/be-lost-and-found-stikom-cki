@@ -1,0 +1,129 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                 String       @id @default(uuid())
+  name               String
+  email              String       @unique
+  password_hash      String
+  role               String       @default("mahasiswa") // "mahasiswa" | "admin_fo" | "admin_developer" | "admin"
+  phone              String?
+  nim                String?      @unique
+  prodi              String?
+  semester           Int?
+  kelas              String?      // "Pagi" | "Malam"
+  daily_report_count Int          @default(0)
+  daily_report_date  DateTime?
+  created_at         DateTime     @default(now())
+  updated_at         DateTime     @updatedAt
+
+  found_items        FoundItem[]
+  lost_reports       LostReport[]
+  claims             Claim[]
+
+  @@map("users")
+}
+
+model StorageLocation {
+  id            String       @id @default(uuid())
+  name          String
+  building      String
+  service_hours String
+  contact       String
+  is_active     Boolean      @default(true)
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @updatedAt
+
+  found_items   FoundItem[]
+
+  @@map("storage_locations")
+}
+
+model Category {
+  id           String       @id @default(uuid())
+  name         String
+  slug         String       @unique
+  created_at   DateTime     @default(now())
+  updated_at   DateTime     @updatedAt
+
+  found_items  FoundItem[]
+  lost_reports LostReport[]
+
+  @@map("categories")
+}
+
+model FoundItem {
+  id                  String          @id @default(uuid())
+  reporter_id         String
+  reporter            User            @relation(fields: [reporter_id], references: [id])
+  category_id         String
+  category            Category        @relation(fields: [category_id], references: [id])
+  storage_location_id String
+  storage_location    StorageLocation @relation(fields: [storage_location_id], references: [id])
+  title               String
+  description         String
+  photo_url           String
+  location_found      String
+  storage_status      String          @default("front_office") // Must remain 'front_office'
+  validation_question String?         @default("Sebutkan ciri khusus atau isi dari barang ini!")
+  hidden_detail       String
+  status              String          @default("active") // "active" | "claimed" | "completed"
+  created_at          DateTime        @default(now())
+  updated_at          DateTime        @updatedAt
+
+  claims              Claim[]
+
+  @@index([status])
+  @@index([category_id, storage_location_id])
+  @@map("found_items")
+}
+
+model LostReport {
+  id                 String       @id @default(uuid())
+  reporter_id        String
+  reporter           User         @relation(fields: [reporter_id], references: [id])
+  category_id        String
+  category           Category     @relation(fields: [category_id], references: [id])
+  title              String
+  description        String
+  photo_url          String?
+  last_seen_location String       @default("Area Kampus STIKOM CKI")
+  hidden_detail      String?
+  contact            String
+  status             String       @default("active") // "active" | "matched" | "completed" | "expired"
+  expires_at         DateTime
+  created_at         DateTime     @default(now())
+  updated_at         DateTime     @updatedAt
+
+  claims             Claim[]
+
+  @@index([status, expires_at])
+  @@map("lost_reports")
+}
+
+model Claim {
+  id               String       @id @default(uuid())
+  found_item_id    String
+  found_item       FoundItem    @relation(fields: [found_item_id], references: [id])
+  lost_report_id   String?
+  lost_report      LostReport?  @relation(fields: [lost_report_id], references: [id])
+  claimant_user_id String
+  claimant         User         @relation(fields: [claimant_user_id], references: [id])
+  claim_code       String       @unique // 6-character cryptographic code
+  claimed_answer   String?      // Claimant's answer to the validation question
+  attempt_count    Int          @default(1)
+  claimed_at       DateTime     @default(now())
+  handed_over_at   DateTime?
+  status           String       @default("claimed") // "claimed" | "handed_over" | "rejected"
+  created_at       DateTime     @default(now())
+  updated_at       DateTime     @updatedAt
+
+  @@index([claim_code])
+  @@map("claims")
+}
