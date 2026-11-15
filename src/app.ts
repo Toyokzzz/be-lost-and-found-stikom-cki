@@ -33,7 +33,10 @@ app.use(express.urlencoded({ extended: true }));
 app.use(authenticate);
 
 // Serve static uploads
-const uploadPath = path.resolve(process.cwd(), config.uploadDir);
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const uploadPath = isServerless
+  ? path.resolve('/tmp', config.uploadDir)
+  : path.resolve(process.cwd(), config.uploadDir);
 app.use('/uploads', express.static(uploadPath));
 
 // Health check endpoint

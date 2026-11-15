@@ -4,11 +4,18 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { config } from '../config';
 
-const uploadDir = path.resolve(process.cwd(), config.uploadDir);
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const uploadDir = isServerless
+  ? path.resolve('/tmp', config.uploadDir)
+  : path.resolve(process.cwd(), config.uploadDir);
 
-// Pastikan folder uploads tersedia
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+// Pastikan folder uploads tersedia tanpa menyebabkan crash EROFS di serverless
+try {
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+} catch (err) {
+  console.warn('[Upload] Gagal membuat direktori upload lokal (read-only filesystem):', err);
 }
 
 const storage = multer.diskStorage({
