@@ -16,6 +16,14 @@ for (const envPath of possibleEnvPaths) {
 }
 dotenv.config();
 
+const isProduction = (process.env.NODE_ENV || 'development').toLowerCase() === 'production';
+const rawJwtSecret = process.env.JWT_SECRET;
+
+// Peringatan keamanan jika JWT_SECRET default digunakan di production
+if (isProduction && (!rawJwtSecret || rawJwtSecret.includes('rahasia_super_secure'))) {
+  console.warn('[SECURITY WARNING]: JWT_SECRET di environment production menggunakan nilai default atau belum disetel!');
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '5000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -26,6 +34,7 @@ export const config = {
   uploadMaxSize: parseInt(process.env.UPLOAD_MAX_SIZE || '2097152', 10), // 2MB
   timezone: process.env.TZ || 'Asia/Jakarta',
   databaseUrl: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/lost_and_found_db?schema=public',
+  adminDefaultPassword: process.env.ADMIN_DEFAULT_PASSWORD || 'AdminPassword2026!',
   googleClientId:
     process.env.GOOGLE_CLIENT_ID ||
     process.env.VITE_GOOGLE_CLIENT_ID ||

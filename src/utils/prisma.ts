@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import '../config'; // Ensure dotenv is fully loaded before connecting
+import { config } from '../config'; // Ensure dotenv is fully loaded before connecting
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
@@ -40,7 +40,7 @@ export async function ensureDatabaseSchema(): Promise<void> {
     `);
 
     // 2. Pastikan akun default Admin Developer dan Admin FO tersedia di database
-    const defaultPasswordHash = await bcrypt.hash('AdminPassword2026!', 10);
+    const defaultPasswordHash = await bcrypt.hash(config.adminDefaultPassword, 10);
 
     // Admin Developer (admin@kampus.ac.id & dev@kampus.ac.id)
     await prisma.user.upsert({

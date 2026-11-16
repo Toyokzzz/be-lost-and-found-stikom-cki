@@ -49,5 +49,18 @@ describe('Hidden Detail Text Normalizer & Matcher (SRS-FR-005)', () => {
       expect(verifyHiddenDetail('', 'stiker')).toBe(false);
       expect(verifyHiddenDetail(actualDetail, 'xyz abc qwe')).toBe(false);
     });
+
+    it('should prevent SEC-02 vulnerability: common stopwords and single word substring guessing must fail', () => {
+      // Kata umum / stopwords
+      expect(verifyHiddenDetail(actualDetail, 'ada')).toBe(false);
+      expect(verifyHiddenDetail(actualDetail, 'dan')).toBe(false);
+      expect(verifyHiddenDetail(actualDetail, 'di')).toBe(false);
+      expect(verifyHiddenDetail(actualDetail, 'yang')).toBe(false);
+      expect(verifyHiddenDetail(actualDetail, 'bagian')).toBe(false);
+      expect(verifyHiddenDetail(actualDetail, 'ada dan di')).toBe(false);
+
+      // Substring tebakan 1 kata umum dari detail panjang
+      expect(verifyHiddenDetail(actualDetail, 'stiker')).toBe(false);
+    });
   });
 });

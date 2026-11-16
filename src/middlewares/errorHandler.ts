@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import multer from 'multer';
+import { config } from '../config';
 
 export class AppError extends Error {
   statusCode: number;
@@ -48,7 +49,7 @@ export function errorHandler(
     return;
   }
 
-  // 3. Known App Errors
+  // 3. Known App Errors (Aman ditampilkan karena pesan terkontrol)
   if (err instanceof AppError) {
     res.status(err.statusCode).json({
       success: false,
@@ -57,10 +58,17 @@ export function errorHandler(
     return;
   }
 
-  // 4. Default / Unexpected Errors
+  // 4. Default / Unexpected Server & Database Errors (SEC-06)
   console.error('[Unhandled Server Error]:', err);
+
+  const isProduction = config.nodeEnv === 'production';
+  // Sanitasi: Jangan membocorkan error mentah Prisma/Database, nama tabel, atau stack trace ke publik di production
+  const safeMessage = isProduction
+    ? 'Terjadi kesalahan internal pada server. Silakan coba beberapa saat lagi atau hubungi administrator.'
+    : err.message || 'Terjadi kesalahan internal pada server.';
+
   res.status(500).json({
     success: false,
-    message: err.message || 'Terjadi kesalahan internal pada server.',
+    message: safeMessage,
   });
 }

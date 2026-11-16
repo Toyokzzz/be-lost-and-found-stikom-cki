@@ -18,14 +18,25 @@ try {
   console.warn('[Upload] Gagal membuat direktori upload lokal (read-only filesystem):', err);
 }
 
+// Whitelist ekstensi dan MIME type resmi untuk mencegah Stored XSS (SEC-04)
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
+
+const ALLOWED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
+
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     cb(null, uploadDir);
   },
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    // Selalu gunakan ekstensi aman yang dipetakan dari MIME type yang telah divalidasi,
+    // bukan mempercayai ekstensi mentah dari input pengguna
+    const safeExt = MIME_TO_EXT[file.mimetype] || '.jpg';
     const randomHex = crypto.randomBytes(16).toString('hex');
-    cb(null, `${Date.now()}-${randomHex}${ext}`);
+    cb(null, `${Date.now()}-${randomHex}${safeExt}`);
   },
 });
 
@@ -34,11 +45,16 @@ const fileFilter = (
   file: Express.Multer.File,
   cb: multer.FileFilterCallback
 ) => {
-  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
-  if (allowedMimeTypes.includes(file.mimetype)) {
+  const rawExt = path.extname(file.originalname).toLowerCase();
+
+  // Validasi ganda: MIME type DAN ekstensi file harus sesuai whitelist gambar aman
+  const isMimeValid = Boolean(MIME_TO_EXT[file.mimetype]);
+  const isExtValid = ALLOWED_EXTENSIONS.has(rawExt);
+
+  if (isMimeValid && isExtValid) {
     cb(null, true);
   } else {
-    cb(new Error('Format file tidak didukung! Hanya gambar JPEG, PNG, dan WebP yang diizinkan.'));
+    cb(new Error('Format file tidak didukung! Hanya gambar JPEG, PNG, dan WebP yang valid yang diizinkan.'));
   }
 };
 

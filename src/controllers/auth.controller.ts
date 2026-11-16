@@ -215,7 +215,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     if (!user) {
       const lowerInput = idInput.toLowerCase();
       if (lowerInput === 'admin@kampus.ac.id' || lowerInput === 'dev@kampus.ac.id' || idInput.toUpperCase() === 'DEV001' || idInput.toUpperCase() === 'DEV002') {
-        const defaultPasswordHash = await bcrypt.hash('AdminPassword2026!', 10);
+        const defaultPasswordHash = await bcrypt.hash(config.adminDefaultPassword, 10);
         user = await prisma.user.create({
           data: {
             name: 'ADMINISTRATOR DEVELOPER',
@@ -229,7 +229,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
           },
         });
       } else if (lowerInput === 'fo@kampus.ac.id' || idInput.toUpperCase() === 'FO001') {
-        const defaultPasswordHash = await bcrypt.hash('AdminPassword2026!', 10);
+        const defaultPasswordHash = await bcrypt.hash(config.adminDefaultPassword, 10);
         user = await prisma.user.create({
           data: {
             name: 'PETUGAS FRONT OFFICE CKI',
@@ -292,13 +292,13 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
 export async function googleLogin(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const validated = googleAuthSchema.parse(req.body);
-    let extractedEmail = (validated.email || '').trim().toLowerCase();
-    let extractedName = (validated.name || '').trim();
+    let extractedEmail = '';
+    let extractedName = '';
 
     const rawToken = validated.credential || validated.token;
     const rawAccessToken = validated.access_token;
 
-    // 1. Verifikasi melalui Google Userinfo API resmi jika access_token disertakan
+    // 1. Verifikasi wajib melalui Google Userinfo API resmi jika access_token disertakan
     if (rawAccessToken) {
       try {
         const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -310,59 +310,43 @@ export async function googleLogin(req: Request, res: Response, next: NextFunctio
             extractedEmail = String(googleProfile.email).trim().toLowerCase();
             extractedName = String(googleProfile.name || googleProfile.email.split('@')[0]).trim();
           }
+        } else {
+          console.warn('[Google Auth]: Userinfo API merespon status error:', googleRes.status);
         }
       } catch (fetchErr) {
-        console.warn('Peringatan: Gagal memverifikasi userinfo Google API (mungkin jaringan sandbox terbatas):', fetchErr);
+        console.warn('[Google Auth]: Gagal menghubungi userinfo Google API:', fetchErr);
       }
     }
 
-    // 2. Verifikasi melalui Google Tokeninfo API resmi atau dekode payload ID Token
+    // 2. Verifikasi wajib melalui Google Tokeninfo API resmi (ID Token / Credential)
     if (!extractedEmail && rawToken) {
       try {
         const tokenInfoRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(rawToken)}`);
         if (tokenInfoRes.ok) {
           const tokenInfo: any = await tokenInfoRes.json();
-          // Verifikasi aud (audience) sesuai Google Client ID jika dikonfigurasi
+          // Validasi aud (audience) agar token memang ditujukan untuk aplikasi ini jika Client ID dikonfigurasi
           if (config.googleClientId && tokenInfo.aud && tokenInfo.aud !== config.googleClientId) {
-            console.warn(`Peringatan: Token audience (${tokenInfo.aud}) tidak cocok dengan server (${config.googleClientId})`);
+            throw new AppError('Token Google tidak valid: Audience (Client ID) tidak cocok dengan server.', 401);
           }
           if (tokenInfo.email) {
             extractedEmail = String(tokenInfo.email).trim().toLowerCase();
             extractedName = String(tokenInfo.name || tokenInfo.email.split('@')[0]).trim();
           }
+        } else {
+          console.warn('[Google Auth]: Tokeninfo API merespon status error:', tokenInfoRes.status);
         }
-      } catch (tokenInfoErr) {
-        // Fallback ke dekode lokal jika tokeninfo Google API tidak dapat dijangkau
-      }
-
-      // Jika belum terekstrak, dekode payload JWT ID Token
-      if (!extractedEmail && rawToken.includes('.')) {
-        try {
-          const parts = rawToken.split('.');
-          if (parts.length >= 2) {
-            let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-            while (base64.length % 4) {
-              base64 += '=';
-            }
-            const decodedStr = Buffer.from(base64, 'base64').toString('utf-8');
-            const payload = JSON.parse(decodedStr);
-            if (payload.email) {
-              extractedEmail = String(payload.email).trim().toLowerCase();
-            }
-            if (payload.name) {
-              extractedName = String(payload.name).trim();
-            }
-          }
-        } catch (decodeErr) {
-          console.warn('Peringatan: Gagal mendekode token Google ID:', decodeErr);
-        }
+      } catch (tokenInfoErr: any) {
+        if (tokenInfoErr instanceof AppError) throw tokenInfoErr;
+        console.warn('[Google Auth]: Gagal menghubungi tokeninfo Google API:', tokenInfoErr);
       }
     }
 
+    // KEAMANAN KETAT (SEC-01): Dilarang melakukan decode payload JWT lokal tanpa verifikasi signature upstream!
+    // Kredensial akun Google HARUS berhasil diverifikasi oleh server Google secara upstream
     if (!extractedEmail || !extractedEmail.includes('@')) {
       throw new AppError(
-        'Autentikasi Google gagal: Kredensial akun Google tidak valid atau profil pengguna tidak dapat diverifikasi oleh Google.',
-        400
+        'Autentikasi Google gagal: Kredensial akun Google tidak valid atau signature token tidak dapat diverifikasi oleh server Google.',
+        401
       );
     }
 
