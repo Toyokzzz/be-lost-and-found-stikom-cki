@@ -2,9 +2,15 @@ import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import '../config'; // Ensure dotenv is fully loaded before connecting
 
-export const prisma = new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
-});
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+
+export const prisma =
+  globalForPrisma.prisma ||
+  new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+  });
+
+globalForPrisma.prisma = prisma;
 
 /**
  * Memastikan kolom-kolom profil dan role di database PostgreSQL kompatibel
