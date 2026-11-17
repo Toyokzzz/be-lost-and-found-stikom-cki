@@ -145,8 +145,9 @@ export async function completePhysicalHandover(claimId: string, userId: string, 
     throw new AppError('Anda tidak memiliki wewenang untuk menyelesaikan klaim ini.', 403);
   }
 
+  // Idempotent: jika klaim sudah diselesaikan sebelumnya, kembalikan data langsung
   if (claim.status === 'handed_over') {
-    throw new AppError('Klaim ini sudah berstatus selesai/diserahkan.', 400);
+    return claim;
   }
 
   const now = new Date();
