@@ -57,7 +57,7 @@ const reportLostSchema = z.object({
     .optional()
     .default('-')
     .transform((v) => (v ? toAlphaUppercase(v) || '-' : '-')),
-  contact: z.string().min(5, 'Nomor WhatsApp aktif minimal 5 karakter'),
+  contact: z.string().optional().default(''),
 });
 
 /**
@@ -513,6 +513,12 @@ export async function reportLost(req: Request, res: Response, next: NextFunction
 
     const photo_url = req.file ? `/uploads/${req.file.filename}` : null;
 
+    const userDb = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { phone: true },
+    });
+    const contactToUse = validated.contact || userDb?.phone || '-';
+
     const newReport = await prisma.lostReport.create({
       data: {
         reporter_id: req.user.id,
@@ -522,7 +528,7 @@ export async function reportLost(req: Request, res: Response, next: NextFunction
         photo_url,
         last_seen_location: validated.last_seen_location,
         hidden_detail: validated.hidden_detail || null,
-        contact: validated.contact,
+        contact: contactToUse,
         status: 'active',
         expires_at,
       },

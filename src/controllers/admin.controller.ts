@@ -232,9 +232,20 @@ const locationSchema = z.object({
   name: z.string().min(3),
   building: z.string().min(3),
   service_hours: z.string().min(3),
-  contact: z.string().min(3),
+  contact: z.string().optional().default(''),
   is_active: z.boolean().default(true),
 });
+
+export async function getAllLocationsAdmin(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const locations = await prisma.storageLocation.findMany({
+      orderBy: { created_at: 'asc' },
+    });
+    res.status(200).json({ success: true, data: locations });
+  } catch (error) {
+    next(error);
+  }
+}
 
 export async function createLocation(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -268,6 +279,23 @@ export async function toggleLocationActive(req: Request, res: Response, next: Ne
       data: { is_active: !loc.is_active },
     });
     res.status(200).json({ success: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteLocation(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const count = await prisma.foundItem.count({ where: { storage_location_id: id } });
+    if (count > 0) {
+      throw new AppError(
+        'Lokasi tidak dapat dihapus karena masih terkait dengan data barang temuan. Silakan nonaktifkan lokasi ini.',
+        400
+      );
+    }
+    await prisma.storageLocation.delete({ where: { id } });
+    res.status(200).json({ success: true, message: 'Lokasi berhasil dihapus.' });
   } catch (error) {
     next(error);
   }

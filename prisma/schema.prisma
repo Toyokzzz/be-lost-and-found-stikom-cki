@@ -14,6 +14,8 @@ model User {
   email              String       @unique
   password_hash      String
   role               String       @default("mahasiswa") // "mahasiswa" | "admin_fo" | "admin_developer" | "admin"
+  user_type          String?      @default("Mahasiswa") // "Mahasiswa" | "Dosen" | "Pegawai"
+  jabatan            String?      // Untuk Dosen / Pegawai
   phone              String?
   nim                String?      @unique
   prodi              String?

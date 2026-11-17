@@ -133,24 +133,54 @@ export async function requireCompleteProfile(req: Request, res: Response, next: 
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { name: true, nim: true, prodi: true, semester: true, kelas: true },
+      select: {
+        name: true,
+        nim: true,
+        prodi: true,
+        semester: true,
+        kelas: true,
+        user_type: true,
+        jabatan: true,
+        phone: true,
+      },
     });
 
-    if (
-      !user ||
-      !user.name?.trim() ||
-      !user.nim?.trim() ||
-      !user.prodi?.trim() ||
-      !user.semester ||
-      !user.kelas?.trim()
-    ) {
+    if (!user) {
       res.status(403).json({
         success: false,
         isProfileIncomplete: true,
-        message:
-          'Profil Anda belum lengkap. Wajib mengisi Nama Lengkap, NIM, Program Studi, Semester (1-8), dan Kelas (Pagi/Malam) sebelum membuat laporan!',
+        message: 'Pengguna tidak ditemukan.',
       });
       return;
+    }
+
+    const userType = user.user_type || 'Mahasiswa';
+    if (userType === 'Dosen' || userType === 'Pegawai') {
+      if (!user.name?.trim() || !user.jabatan?.trim() || !user.phone?.trim()) {
+        res.status(403).json({
+          success: false,
+          isProfileIncomplete: true,
+          message:
+            'Profil Anda belum lengkap. Wajib mengisi Nama Lengkap, Jabatan / Posisi, dan Nomor WhatsApp sebelum membuat laporan!',
+        });
+        return;
+      }
+    } else {
+      if (
+        !user.name?.trim() ||
+        !user.nim?.trim() ||
+        !user.prodi?.trim() ||
+        !user.semester ||
+        !user.kelas?.trim()
+      ) {
+        res.status(403).json({
+          success: false,
+          isProfileIncomplete: true,
+          message:
+            'Profil Anda belum lengkap. Wajib mengisi Nama Lengkap, NIM, Program Studi, Semester (1-8), dan Kelas (Pagi/Malam) sebelum membuat laporan!',
+        });
+        return;
+      }
     }
 
     next();

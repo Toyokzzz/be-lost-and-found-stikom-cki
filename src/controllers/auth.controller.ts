@@ -28,6 +28,9 @@ export async function getGoogleConfig(_req: Request, res: Response): Promise<voi
  */
 export function isProfileComplete(user: {
   name?: string | null;
+  phone?: string | null;
+  user_type?: string | null;
+  jabatan?: string | null;
   nim?: string | null;
   prodi?: string | null;
   semester?: number | null;
@@ -37,12 +40,29 @@ export function isProfileComplete(user: {
   if (!user) return false;
 
   const role = (user.role || '').toLowerCase();
-  // Role administrator dibebaskan dari syarat profil mahasiswa
-  if (role === 'admin' || role === 'admin_developer' || role === 'admin_fo') {
-    return true;
+  const name = typeof user.name === 'string' ? user.name.trim() : '';
+  const phone = typeof user.phone === 'string' ? user.phone.trim() : '';
+
+  // 1. Admin FO: hanya nama lengkap yang wajib diisi
+  if (role === 'admin_fo') {
+    return Boolean(name.length > 0);
   }
 
-  const name = typeof user.name === 'string' ? user.name.trim() : '';
+  // 2. Admin Developer: hanya nama lengkap dan no whatsapp yang wajib diisi
+  if (role === 'admin' || role === 'admin_developer') {
+    return Boolean(name.length > 0 && phone.length > 0);
+  }
+
+  // 3. Regular User (civitas kampus):
+  const userType = user.user_type || 'Mahasiswa';
+
+  if (userType === 'Dosen' || userType === 'Pegawai') {
+    // Dosen / Pegawai: nama lengkap, jabatan / posisi, nomor whatsapp wajib diisi
+    const jabatan = typeof user.jabatan === 'string' ? user.jabatan.trim() : '';
+    return Boolean(name.length > 0 && jabatan.length > 0 && phone.length > 0);
+  }
+
+  // Mahasiswa: nama lengkap, NIM, prodi, semester, kelas wajib diisi
   const nim = user.nim ? String(user.nim).trim() : '';
   const prodi = typeof user.prodi === 'string' ? user.prodi.trim() : '';
   const semester = Number(user.semester);
@@ -86,12 +106,12 @@ const loginSchema = z
 
 const updateProfileSchema = z.object({
   name: z.string().min(3, 'Nama Lengkap minimal 3 karakter').max(100),
-  nim: z.string().min(3, 'NIM minimal 3 karakter').max(30),
-  prodi: z.string().min(2, 'Program Studi wajib dipilih'),
-  semester: z.number().int().min(1, 'Semester minimal 1').max(8, 'Semester maksimal 8'),
-  kelas: z.enum(['Pagi', 'Malam'], {
-    errorMap: () => ({ message: 'Pilihan kelas harus "Pagi" atau "Malam"' }),
-  }),
+  user_type: z.enum(['Mahasiswa', 'Dosen', 'Pegawai']).optional(),
+  jabatan: z.string().optional(),
+  nim: z.string().optional(),
+  prodi: z.string().optional(),
+  semester: z.number().int().min(1).max(8).optional(),
+  kelas: z.enum(['Pagi', 'Malam']).optional(),
   phone: z.string().optional(),
 });
 
@@ -270,6 +290,8 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
           name: user.name,
           email: user.email,
           role: user.role,
+          user_type: user.user_type,
+          jabatan: user.jabatan,
           phone: user.phone,
           nim: user.nim,
           prodi: user.prodi,
@@ -414,6 +436,8 @@ export async function googleLogin(req: Request, res: Response, next: NextFunctio
           name: user.name,
           email: user.email,
           role: user.role,
+          user_type: user.user_type,
+          jabatan: user.jabatan,
           phone: user.phone,
           nim: user.nim,
           prodi: user.prodi,
@@ -430,7 +454,7 @@ export async function googleLogin(req: Request, res: Response, next: NextFunctio
 }
 
 /**
- * Update Data Profil Pengguna (SRS & User Request: Modul Profil Wajib Lengkap).
+ * Update Data Profil Pengguna (SRS & User Request: Modul Profil Sesuai Peran Civitas).
  */
 export async function updateProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -439,37 +463,89 @@ export async function updateProfile(req: Request, res: Response, next: NextFunct
     }
 
     const validated = updateProfileSchema.parse(req.body);
-
-    // Otomatis Kapital Nama Lengkap
+    const role = (req.user.role || '').toLowerCase();
     const formattedName = validated.name.trim().toUpperCase();
 
-    // Periksa apakah NIM sudah digunakan pengguna lain
-    const existingNim = await prisma.user.findFirst({
-      where: {
-        nim: String(validated.nim).trim(),
-        NOT: { id: req.user.id },
-      },
-    });
+    let user_type = validated.user_type || 'Mahasiswa';
+    let jabatan = validated.jabatan ? validated.jabatan.trim() : null;
+    let phone = validated.phone ? validated.phone.trim() : null;
+    let nim = validated.nim ? String(validated.nim).trim() : null;
+    let prodi = validated.prodi ? validated.prodi.trim() : null;
+    let semester = validated.semester || null;
+    let kelas = validated.kelas || null;
 
-    if (existingNim) {
-      throw new AppError('NIM ini sudah terdaftar oleh pengguna lain.', 400);
+    // Validasi berdasarkan role dan user_type
+    if (role === 'admin_fo') {
+      // Admin FO: hanya nama lengkap yang wajib diisi
+    } else if (role === 'admin' || role === 'admin_developer') {
+      // Admin Dev: nama lengkap dan no whatsapp wajib diisi
+      if (!phone) {
+        throw new AppError('Nomor WhatsApp wajib diisi untuk Administrator.', 400);
+      }
+    } else {
+      // Regular user civitas
+      if (user_type === 'Dosen' || user_type === 'Pegawai') {
+        if (!jabatan) {
+          throw new AppError('Jabatan / Posisi wajib diisi untuk Dosen / Pegawai.', 400);
+        }
+        if (!phone) {
+          throw new AppError('Nomor WhatsApp wajib diisi untuk Dosen / Pegawai.', 400);
+        }
+      } else {
+        // Mahasiswa: nama, nim, prodi, semester, kelas wajib
+        user_type = 'Mahasiswa';
+        if (!nim) {
+          throw new AppError('NIM wajib diisi untuk Mahasiswa.', 400);
+        }
+        if (!prodi) {
+          throw new AppError('Program Studi wajib dipilih.', 400);
+        }
+        const allowedProdi = ['Teknik Informatika', 'Sistem Informasi', 'Bisnis Digital'];
+        if (!allowedProdi.includes(prodi)) {
+          throw new AppError('Program Studi harus salah satu dari: Teknik Informatika, Sistem Informasi, atau Bisnis Digital.', 400);
+        }
+        if (!semester || semester < 1 || semester > 8) {
+          throw new AppError('Semester harus antara 1 sampai 8.', 400);
+        }
+        if (!kelas || (kelas !== 'Pagi' && kelas !== 'Malam')) {
+          throw new AppError('Pilihan kelas harus "Pagi" atau "Malam".', 400);
+        }
+      }
+    }
+
+    // Periksa apakah NIM sudah digunakan pengguna lain jika nim diisi
+    if (nim) {
+      const existingNim = await prisma.user.findFirst({
+        where: {
+          nim,
+          NOT: { id: req.user.id },
+        },
+      });
+
+      if (existingNim) {
+        throw new AppError('NIM ini sudah terdaftar oleh pengguna lain.', 400);
+      }
     }
 
     const updatedUser = await prisma.user.update({
       where: { id: req.user.id },
       data: {
         name: formattedName,
-        nim: String(validated.nim).trim(),
-        prodi: validated.prodi.trim(),
-        semester: validated.semester,
-        kelas: validated.kelas,
-        phone: validated.phone || null,
+        user_type,
+        jabatan,
+        nim,
+        prodi,
+        semester,
+        kelas,
+        phone,
       },
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
+        user_type: true,
+        jabatan: true,
         phone: true,
         nim: true,
         prodi: true,
@@ -507,6 +583,8 @@ export async function getMe(req: Request, res: Response, next: NextFunction): Pr
         name: true,
         email: true,
         role: true,
+        user_type: true,
+        jabatan: true,
         phone: true,
         nim: true,
         prodi: true,
