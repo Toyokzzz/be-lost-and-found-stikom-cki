@@ -94,6 +94,18 @@ export async function verifyAndCreateClaim(
         found_item: {
           include: { storage_location: true, category: true },
         },
+        claimant: {
+          select: {
+            id: true,
+            name: true,
+            nim: true,
+            prodi: true,
+            semester: true,
+            kelas: true,
+            phone: true,
+            email: true,
+          },
+        },
       },
     });
 
@@ -108,8 +120,12 @@ export async function verifyAndCreateClaim(
 }
 
 /**
- * Menandai "Barang Sudah Diterima" secara fisik oleh pemilik.
+ * Menandai "Barang Sudah Diterima" secara fisik oleh pemilik atau pelapor penemu.
  * Sesuai CST-07 & SRS-FR-006.
+ * Pemangku yang bisa mengkonfirmasi:
+ * - Pengklaim barang (claimant)
+ * - Pelapor penemu barang (reporter) — perubahan: tombol pindah dari admin FO ke user pelapor
+ * - Admin / Admin FO
  */
 export async function completePhysicalHandover(claimId: string, userId: string, isAdmin = false) {
   const claim = await prisma.claim.findUnique({
@@ -121,8 +137,11 @@ export async function completePhysicalHandover(claimId: string, userId: string, 
     throw new AppError('Klaim tidak ditemukan.', 404);
   }
 
-  // Pemilik klaim atau Admin yang boleh menyelesaikan
-  if (!isAdmin && claim.claimant_user_id !== userId) {
+  // Izinkan: pengklaim, pelapor penemu, atau admin
+  const isClaimant = claim.claimant_user_id === userId;
+  const isReporter = claim.found_item.reporter_id === userId;
+
+  if (!isAdmin && !isClaimant && !isReporter) {
     throw new AppError('Anda tidak memiliki wewenang untuk menyelesaikan klaim ini.', 403);
   }
 

@@ -3,23 +3,60 @@ import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middlewares/errorHandler';
 import { checkAndConsumeLostReportQuota } from '../services/quota.service';
+import { buildPhotoUrl } from '../utils/photoUrl';
+
+// Helper: format teks ke uppercase dan sanitasi karakter (auto-capslock)
+function toAlphaUppercase(val: string): string {
+  if (!val) return '';
+  // Ubah ke UPPERCASE dan izinkan karakter alfanumerik, spasi, serta tanda baca umum
+  return val.toUpperCase().replace(/[^A-Z0-9\s\-.,()?!/]/g, '').trim();
+}
+
+const alphaStringField = (minLen: number, label: string) =>
+  z
+    .string()
+    .min(1, `${label} wajib diisi`)
+    .transform((val) => toAlphaUppercase(val))
+    .refine((val) => val.length >= minLen, {
+      message: `${label} minimal ${minLen} karakter`,
+    });
 
 const reportFoundSchema = z.object({
-  title: z.string().min(3, 'Nama barang minimal 3 karakter').max(150),
+  title: z
+    .string()
+    .min(3, 'Nama barang minimal 3 karakter')
+    .max(150)
+    .transform((v) => toAlphaUppercase(v)),
   category_id: z.string().uuid('Kategori tidak valid'),
   storage_location_id: z.string().uuid('Lokasi loket Front Office wajib dipilih'),
-  description: z.string().min(5, 'Deskripsi umum barang minimal 5 karakter'),
-  location_found: z.string().min(2, 'Lokasi ditemukan minimal 2 karakter').default('Area Kampus STIKOM CKI'),
-  validation_question: z.string().min(3, 'Pertanyaan validasi minimal 3 karakter'),
-  hidden_detail: z.string().min(2, 'Kunci jawaban validasi minimal 2 karakter'),
+  description: alphaStringField(5, 'Deskripsi umum barang'),
+  location_found: z
+    .string()
+    .min(2, 'Lokasi ditemukan minimal 2 karakter')
+    .default('Area Kampus STIKOM CKI')
+    .transform((v) => toAlphaUppercase(v) || 'AREA KAMPUS STIKOM CKI'),
+  validation_question: alphaStringField(3, 'Pertanyaan validasi'),
+  hidden_detail: alphaStringField(2, 'Kunci jawaban validasi'),
 });
 
 const reportLostSchema = z.object({
-  title: z.string().min(3, 'Nama barang minimal 3 karakter').max(150),
+  title: z
+    .string()
+    .min(3, 'Nama barang minimal 3 karakter')
+    .max(150)
+    .transform((v) => toAlphaUppercase(v)),
   category_id: z.string().uuid('Kategori tidak valid'),
-  description: z.string().min(5, 'Deskripsi umum barang minimal 5 karakter'),
-  last_seen_location: z.string().optional().default('Area Kampus STIKOM CKI'),
-  hidden_detail: z.string().optional().default('-'),
+  description: alphaStringField(5, 'Deskripsi umum barang'),
+  last_seen_location: z
+    .string()
+    .optional()
+    .default('Area Kampus STIKOM CKI')
+    .transform((v) => (v ? toAlphaUppercase(v) : 'AREA KAMPUS STIKOM CKI')),
+  hidden_detail: z
+    .string()
+    .optional()
+    .default('-')
+    .transform((v) => (v ? toAlphaUppercase(v) || '-' : '-')),
   contact: z.string().min(5, 'Nomor WhatsApp aktif minimal 5 karakter'),
 });
 
@@ -54,9 +91,8 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
       const whereFound: any = {};
       if (status) {
         whereFound.status = status;
-      } else {
-        whereFound.status = { in: ['active', 'claimed'] }; // Default katalog publik: aktif atau claimed
       }
+      // Default katalog publik: tampilkan semua status (active, claimed, completed)
       if (category_id) whereFound.category_id = category_id as string;
       if (storage_location_id) whereFound.storage_location_id = storage_location_id as string;
       if (searchKeyword) {
@@ -92,6 +128,25 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
                 kelas: true,
               },
             },
+            // Sertakan data klaim aktif (claimant name & claim_code untuk tampilan publik)
+            claims: {
+              where: { status: { in: ['claimed', 'handed_over'] } },
+              select: {
+                id: true,
+                claim_code: true,
+                status: true,
+                claimed_at: true,
+                claimant: {
+                  select: {
+                    id: true,
+                    name: true,
+                    nim: true,
+                  },
+                },
+              },
+              orderBy: { created_at: 'desc' },
+              take: 1,
+            },
             // CST-05: Sembunyikan hidden_detail secara ketat
           },
           orderBy: { created_at: 'desc' },
@@ -101,7 +156,21 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
         prisma.foundItem.count({ where: whereFound }),
       ]);
 
-      foundItems = items.map((i) => ({ ...i, item_type: 'found' }));
+      foundItems = items.map((i) => ({
+        ...i,
+        item_type: 'found',
+        // Normalisasi photo_url menjadi URL absolut agar gambar tampil di frontend
+        photo_url: buildPhotoUrl(i.photo_url, req),
+        // Ekspos claimant info jika ada (untuk card catalog)
+        active_claim: i.claims && i.claims.length > 0 ? {
+          claim_code: i.claims[0].claim_code,
+          status: i.claims[0].status,
+          claimant_name: i.claims[0].claimant?.name || null,
+          claimant_nim: i.claims[0].claimant?.nim || null,
+        } : null,
+      }));
+      // Hapus array claims mentah dari response publik
+      foundItems = foundItems.map(({ claims, ...rest }: any) => rest);
       if (type === 'found') totalCount = count;
     }
 
@@ -110,9 +179,8 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
       const whereLost: any = {};
       if (status) {
         whereLost.status = status;
-      } else {
-        whereLost.status = 'active'; // Default hanya yang masih aktif
       }
+      // Default laporan hilang: tampilkan semua status (active, matched, completed, expired)
       if (category_id) whereLost.category_id = category_id as string;
       if (searchKeyword) {
         whereLost.OR = [
@@ -155,7 +223,12 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
         prisma.lostReport.count({ where: whereLost }),
       ]);
 
-      lostReports = items.map((i) => ({ ...i, item_type: 'lost' }));
+      lostReports = items.map((i) => ({
+        ...i,
+        item_type: 'lost',
+        // Normalisasi photo_url menjadi URL absolut agar gambar tampil di frontend
+        photo_url: buildPhotoUrl(i.photo_url, req),
+      }));
       if (type === 'lost') totalCount = count;
     }
 
@@ -213,6 +286,29 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
               kelas: true,
             },
           },
+          // Sertakan klaim aktif untuk tampilkan nama pengklaim & kode unik di detail
+          claims: {
+            where: { status: { in: ['claimed', 'handed_over'] } },
+            select: {
+              id: true,
+              claim_code: true,
+              status: true,
+              claimed_at: true,
+              handed_over_at: true,
+              claimant: {
+                select: {
+                  id: true,
+                  name: true,
+                  nim: true,
+                  prodi: true,
+                  semester: true,
+                  kelas: true,
+                },
+              },
+            },
+            orderBy: { created_at: 'desc' },
+            take: 1,
+          },
         },
       });
 
@@ -227,9 +323,30 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
         delete responseData.hidden_detail;
       }
 
+      // Ekspos active_claim (nama pengklaim + kode unik) untuk semua user saat melihat detail
+      const activeClaim = item.claims && item.claims.length > 0 ? item.claims[0] : null;
+      const { claims, ...itemWithoutClaims } = responseData;
+
       res.status(200).json({
         success: true,
-        data: { ...responseData, item_type: 'found' },
+        data: {
+          ...itemWithoutClaims,
+          item_type: 'found',
+          // Normalisasi photo_url agar gambar tampil di frontend
+          photo_url: buildPhotoUrl(itemWithoutClaims.photo_url, req),
+          active_claim: activeClaim ? {
+            id: activeClaim.id,
+            claim_code: activeClaim.claim_code,
+            status: activeClaim.status,
+            claimed_at: activeClaim.claimed_at,
+            handed_over_at: activeClaim.handed_over_at,
+            claimant_name: activeClaim.claimant?.name || null,
+            claimant_nim: activeClaim.claimant?.nim || null,
+            claimant_prodi: activeClaim.claimant?.prodi || null,
+            claimant_semester: activeClaim.claimant?.semester || null,
+            claimant_kelas: activeClaim.claimant?.kelas || null,
+          } : null,
+        },
       });
       return;
     }
@@ -265,7 +382,12 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
 
       res.status(200).json({
         success: true,
-        data: { ...responseData, item_type: 'lost' },
+        data: {
+          ...responseData,
+          item_type: 'lost',
+          // Normalisasi photo_url agar gambar tampil di frontend
+          photo_url: buildPhotoUrl(responseData.photo_url, req),
+        },
       });
       return;
     }
@@ -339,7 +461,10 @@ export async function reportFound(req: Request, res: Response, next: NextFunctio
     res.status(201).json({
       success: true,
       message: 'Laporan barang temuan berhasil dibuat. Harap segera titipkan barang ke loket Front Office terkait.',
-      data: newItem,
+      data: {
+        ...newItem,
+        photo_url: buildPhotoUrl(newItem.photo_url, req),
+      },
     });
   } catch (error) {
     next(error);
@@ -398,7 +523,10 @@ export async function reportLost(req: Request, res: Response, next: NextFunction
       success: true,
       message: 'Laporan kehilangan berhasil dipublikasikan. Laporan akan aktif selama 7 hari kalender.',
       data: {
-        report: newReport,
+        report: {
+          ...newReport,
+          photo_url: buildPhotoUrl(newReport.photo_url, req),
+        },
         quota: quotaInfo,
       },
     });
@@ -419,7 +547,26 @@ export async function getMyReports(req: Request, res: Response, next: NextFuncti
     const [foundItems, lostReports] = await Promise.all([
       prisma.foundItem.findMany({
         where: { reporter_id: req.user.id },
-        include: { category: true, storage_location: true, claims: true },
+        include: {
+          category: true,
+          storage_location: true,
+          claims: {
+            include: {
+              claimant: {
+                select: {
+                  id: true,
+                  name: true,
+                  nim: true,
+                  prodi: true,
+                  semester: true,
+                  kelas: true,
+                  phone: true,
+                },
+              },
+            },
+            orderBy: { created_at: 'desc' },
+          },
+        },
         orderBy: { created_at: 'desc' },
       }),
       prisma.lostReport.findMany({
@@ -429,11 +576,38 @@ export async function getMyReports(req: Request, res: Response, next: NextFuncti
       }),
     ]);
 
+    // Normalisasi photo_url dan tambahkan active_claim info untuk pelapor
+    const normalizedFoundItems = foundItems.map((item) => {
+      const activeClaim = item.claims.find((c) => c.status === 'claimed' || c.status === 'handed_over') || null;
+      return {
+        ...item,
+        photo_url: buildPhotoUrl(item.photo_url, req),
+        active_claim: activeClaim ? {
+          id: activeClaim.id,
+          claim_code: activeClaim.claim_code,
+          status: activeClaim.status,
+          claimed_at: activeClaim.claimed_at,
+          handed_over_at: activeClaim.handed_over_at,
+          claimant_name: activeClaim.claimant?.name || null,
+          claimant_nim: activeClaim.claimant?.nim || null,
+          claimant_prodi: activeClaim.claimant?.prodi || null,
+          claimant_semester: activeClaim.claimant?.semester || null,
+          claimant_kelas: activeClaim.claimant?.kelas || null,
+          claimant_phone: activeClaim.claimant?.phone || null,
+        } : null,
+      };
+    });
+
+    const normalizedLostReports = lostReports.map((item) => ({
+      ...item,
+      photo_url: buildPhotoUrl(item.photo_url, req),
+    }));
+
     res.status(200).json({
       success: true,
       data: {
-        foundItems,
-        lostReports,
+        foundItems: normalizedFoundItems,
+        lostReports: normalizedLostReports,
       },
     });
   } catch (error) {

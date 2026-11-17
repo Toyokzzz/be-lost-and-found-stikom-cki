@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middlewares/errorHandler';
 import { verifyAndCreateClaim, completePhysicalHandover } from '../services/claim.service';
+import { buildPhotoUrl } from '../utils/photoUrl';
 
 const verifyClaimSchema = z.object({
   found_item_id: z.string().uuid('ID barang temuan tidak valid'),
@@ -46,7 +47,8 @@ export async function verifyClaim(req: Request, res: Response, next: NextFunctio
 }
 
 /**
- * Konfirmasi "Barang Sudah Diterima" oleh Mahasiswa Pemilik (SRS-FR-006 & CST-07).
+ * Konfirmasi "Barang Sudah Diterima" oleh Mahasiswa Pemilik atau Pelapor Penemu (SRS-FR-006 & CST-07).
+ * Tombol konfirmasi dipindahkan dari Admin FO ke user (pelapor barang / pengklaim).
  */
 export async function completeClaim(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -71,7 +73,7 @@ export async function completeClaim(req: Request, res: Response, next: NextFunct
 }
 
 /**
- * Mengambil daftar seluruh klaim yang pernah diajukan oleh pengguna saat ini.
+ * Mengambil daftar seluruh klaim yang pernah diajukan oleh pengguna saat ini (sebagai pengklaim).
  */
 export async function getMyClaims(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -86,15 +88,105 @@ export async function getMyClaims(req: Request, res: Response, next: NextFunctio
           include: {
             storage_location: true,
             category: true,
+            reporter: {
+              select: {
+                id: true,
+                name: true,
+                nim: true,
+                prodi: true,
+                semester: true,
+                kelas: true,
+              },
+            },
+          },
+        },
+        claimant: {
+          select: {
+            id: true,
+            name: true,
+            nim: true,
+            prodi: true,
+            semester: true,
+            kelas: true,
+            phone: true,
+            email: true,
           },
         },
       },
       orderBy: { created_at: 'desc' },
     });
 
+    // Normalisasi photo_url
+    const normalizedClaims = claims.map((claim) => ({
+      ...claim,
+      found_item: claim.found_item ? {
+        ...claim.found_item,
+        photo_url: buildPhotoUrl(claim.found_item.photo_url, req),
+      } : null,
+    }));
+
     res.status(200).json({
       success: true,
-      data: claims,
+      data: normalizedClaims,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Mengambil klaim yang masuk pada barang temuan milik user (sebagai pelapor penemu).
+ * Digunakan oleh user pelapor untuk melihat siapa yang mengklaim & mengkonfirmasi serah terima.
+ * Ini adalah fitur pengganti tombol "barang sudah diklaim" yang dulu ada di admin FO.
+ */
+export async function getClaimsOnMyItems(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AppError('Anda harus login.', 401);
+    }
+
+    // Ambil semua klaim pada barang temuan yang dilaporkan oleh user ini
+    const claims = await prisma.claim.findMany({
+      where: {
+        found_item: {
+          reporter_id: req.user.id,
+        },
+      },
+      include: {
+        found_item: {
+          include: {
+            storage_location: true,
+            category: true,
+          },
+        },
+        claimant: {
+          select: {
+            id: true,
+            name: true,
+            nim: true,
+            prodi: true,
+            semester: true,
+            kelas: true,
+            phone: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    // Normalisasi photo_url
+    const normalizedClaims = claims.map((claim) => ({
+      ...claim,
+      found_item: claim.found_item ? {
+        ...claim.found_item,
+        photo_url: buildPhotoUrl(claim.found_item.photo_url, req),
+      } : null,
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: normalizedClaims,
     });
   } catch (error) {
     next(error);

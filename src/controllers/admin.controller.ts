@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../middlewares/errorHandler';
+import { buildPhotoUrl } from '../utils/photoUrl';
 
 /**
  * Statistik Ringkasan Sistem untuk Dashboard Admin (SRS-FR-007).
@@ -101,7 +102,7 @@ export async function getAllAdminItems(req: Request, res: Response, next: NextFu
         },
         orderBy: { created_at: 'desc' },
       });
-      foundItems = foundItems.map((i) => ({ ...i, item_type: 'found' }));
+      foundItems = foundItems.map((i) => ({ ...i, item_type: 'found', photo_url: buildPhotoUrl(i.photo_url, req) }));
     }
 
     if (type === 'all' || type === 'lost') {
@@ -126,7 +127,7 @@ export async function getAllAdminItems(req: Request, res: Response, next: NextFu
         },
         orderBy: { created_at: 'desc' },
       });
-      lostReports = lostReports.map((i) => ({ ...i, item_type: 'lost' }));
+      lostReports = lostReports.map((i) => ({ ...i, item_type: 'lost', photo_url: buildPhotoUrl(i.photo_url, req) }));
     }
 
     res.status(200).json({
@@ -324,8 +325,13 @@ export async function resolveStuckClaim(req: Request, res: Response, next: NextF
 
 /**
  * Data Khusus Panel Admin Front Office (FO) (SRS & User Request 7).
- * Menampilkan katalog barang beserta pertanyaan verifikasi penemu, jawaban verifikasi (hidden detail),
- * dan Claim Code untuk proses validasi penyerahan barang di loket FO.
+ * Menampilkan daftar barang temuan beserta:
+ * - Kode unik klaim (claim_code) dari si pengklaim
+ * - Pertanyaan validasi (validation_question) dari pelapor penemu
+ * - Jawaban validasi (hidden_detail) dari pelapor penemu
+ * - Nama & data si pengklaim barang
+ * CATATAN: Tombol "barang sudah diklaim" dipindah ke sisi user/pelapor,
+ *          tampilan FO hanya untuk pencocokan kode unik.
  */
 export async function getFODashboardData(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
@@ -389,9 +395,41 @@ export async function getFODashboardData(req: Request, res: Response, next: Next
       });
     }
 
+    // Format response FO: hanya tampilkan kode unik, pertanyaan, jawaban dari pelapor
+    // dan data pengklaim (nama, kode unik) untuk pencocokan di loket
+    const foFormattedItems = filteredItems.map((item) => {
+      const activeClaim = item.claims.find((c) => c.status === 'claimed' || c.status === 'handed_over') || null;
+      return {
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        // Normalisasi photo_url agar gambar tampil di admin FO
+        photo_url: buildPhotoUrl(item.photo_url, req),
+        location_found: item.location_found,
+        status: item.status,
+        created_at: item.created_at,
+        category: item.category,
+        storage_location: item.storage_location,
+        // Data pelapor penemu + pertanyaan & jawaban validasi (untuk FO)
+        reporter: item.reporter,
+        validation_question: item.validation_question,
+        hidden_detail: item.hidden_detail, // Jawaban validasi dari pelapor
+        // Data pengklaim: kode unik untuk dicocokkan FO
+        active_claim: activeClaim ? {
+          id: activeClaim.id,
+          claim_code: activeClaim.claim_code,  // Kode unik pengklaim
+          status: activeClaim.status,
+          claimed_at: activeClaim.claimed_at,
+          handed_over_at: activeClaim.handed_over_at,
+          claimant: activeClaim.claimant,       // Data lengkap pengklaim
+        } : null,
+        total_claims: item.claims.length,
+      };
+    });
+
     res.status(200).json({
       success: true,
-      data: filteredItems,
+      data: foFormattedItems,
     });
   } catch (error) {
     next(error);

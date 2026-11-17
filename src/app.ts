@@ -60,8 +60,10 @@ app.use(
   express.static(uploadPath, {
     setHeaders: (res) => {
       res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; sandbox");
+      // Perbaikan: izinkan img-src dari semua origin agar gambar bisa dimuat di frontend
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src * data:;");
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Access-Control-Allow-Origin', '*');
     },
   })
 );
