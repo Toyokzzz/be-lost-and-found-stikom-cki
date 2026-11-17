@@ -6,14 +6,14 @@ import {
   reportLost,
   getMyReports,
 } from '../controllers/items.controller';
-import { verifyToken, requireAuth, requireCompleteProfile } from '../middlewares/auth.middleware';
+import { authenticate, verifyToken, requireAuth, requireCompleteProfile } from '../middlewares/auth.middleware';
 import { upload } from '../utils/upload';
 
 const router = Router();
 
-// Public routes
-router.get('/', getItems);
-router.get('/:type/:id', getItemDetail);
+// Public routes (dengan authenticate opsional agar req.user tersedia jika client login)
+router.get('/', authenticate, getItems);
+router.get('/:type/:id', authenticate, getItemDetail);
 
 // Protected routes (Wajib login mahasiswa / civitas kampus & profil lengkap)
 router.post('/found', verifyToken, requireAuth, requireCompleteProfile, upload.single('photo'), reportFound);

@@ -80,6 +80,10 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
     const takeNum = Math.min(50, Math.max(1, parseInt(limit as string, 10) || 12));
     const skipNum = (pageNum - 1) * takeNum;
 
+    const currentUserId = req.user?.id;
+    const userRole = (req.user?.role || '').toLowerCase();
+    const isStaffOrAdmin = userRole === 'admin' || userRole === 'admin_fo' || userRole === 'admin_developer';
+
     const searchKeyword = search ? (search as string).trim() : '';
 
     let foundItems: any[] = [];
@@ -126,6 +130,7 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
                 prodi: true,
                 semester: true,
                 kelas: true,
+                phone: true,
               },
             },
             // Sertakan data klaim aktif (claimant name & claim_code untuk tampilan publik)
@@ -136,6 +141,7 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
                 claim_code: true,
                 status: true,
                 claimed_at: true,
+                claimant_user_id: true,
                 claimant: {
                   select: {
                     id: true,
@@ -156,19 +162,27 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
         prisma.foundItem.count({ where: whereFound }),
       ]);
 
-      foundItems = items.map((i) => ({
-        ...i,
-        item_type: 'found',
-        // Normalisasi photo_url menjadi URL absolut agar gambar tampil di frontend
-        photo_url: buildPhotoUrl(i.photo_url, req),
-        // Ekspos claimant info jika ada (untuk card catalog)
-        active_claim: i.claims && i.claims.length > 0 ? {
-          claim_code: i.claims[0].claim_code,
-          status: i.claims[0].status,
-          claimant_name: i.claims[0].claimant?.name || null,
-          claimant_nim: i.claims[0].claimant?.nim || null,
-        } : null,
-      }));
+      foundItems = items.map((i) => {
+        const rawClaim = i.claims && i.claims.length > 0 ? i.claims[0] : null;
+        // Kode unik hanya muncul di: pengklaim, admin FO, dan admin Dev
+        const isClaimant = Boolean(currentUserId && rawClaim && rawClaim.claimant_user_id === currentUserId);
+        const canSeeClaimCode = isStaffOrAdmin || isClaimant;
+
+        return {
+          ...i,
+          item_type: 'found',
+          // Normalisasi photo_url menjadi URL absolut agar gambar tampil di frontend
+          photo_url: buildPhotoUrl(i.photo_url, req),
+          // Ekspos claimant info jika ada (untuk card catalog)
+          active_claim: rawClaim ? {
+            claim_code: canSeeClaimCode ? rawClaim.claim_code : null,
+            status: rawClaim.status,
+            claimant_id: rawClaim.claimant_user_id,
+            claimant_name: rawClaim.claimant?.name || null,
+            claimant_nim: rawClaim.claimant?.nim || null,
+          } : null,
+        };
+      });
       // Hapus array claims mentah dari response publik
       foundItems = foundItems.map(({ claims, ...rest }: any) => rest);
       if (type === 'found') totalCount = count;
@@ -212,6 +226,7 @@ export async function getItems(req: Request, res: Response, next: NextFunction):
                 prodi: true,
                 semester: true,
                 kelas: true,
+                phone: true,
               },
             },
             // CST-05: Sembunyikan hidden_detail secara ketat
@@ -284,6 +299,7 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
               prodi: true,
               semester: true,
               kelas: true,
+              phone: true,
             },
           },
           // Sertakan klaim aktif untuk tampilkan nama pengklaim & kode unik di detail
@@ -295,6 +311,7 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
               status: true,
               claimed_at: true,
               handed_over_at: true,
+              claimant_user_id: true,
               claimant: {
                 select: {
                   id: true,
@@ -303,6 +320,7 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
                   prodi: true,
                   semester: true,
                   kelas: true,
+                  phone: true,
                 },
               },
             },
@@ -323,8 +341,11 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
         delete responseData.hidden_detail;
       }
 
-      // Ekspos active_claim (nama pengklaim + kode unik) untuk semua user saat melihat detail
+      // Kode unik hanya boleh muncul untuk: user pengklaim, admin FO, dan admin Dev
       const activeClaim = item.claims && item.claims.length > 0 ? item.claims[0] : null;
+      const isClaimant = Boolean(currentUserId && activeClaim && (activeClaim.claimant_user_id === currentUserId || activeClaim.claimant?.id === currentUserId));
+      const canSeeClaimCode = isStaffOrAdmin || isClaimant;
+
       const { claims, ...itemWithoutClaims } = responseData;
 
       res.status(200).json({
@@ -336,10 +357,11 @@ export async function getItemDetail(req: Request, res: Response, next: NextFunct
           photo_url: buildPhotoUrl(itemWithoutClaims.photo_url, req),
           active_claim: activeClaim ? {
             id: activeClaim.id,
-            claim_code: activeClaim.claim_code,
+            claim_code: canSeeClaimCode ? activeClaim.claim_code : null,
             status: activeClaim.status,
             claimed_at: activeClaim.claimed_at,
             handed_over_at: activeClaim.handed_over_at,
+            claimant_id: activeClaim.claimant_user_id,
             claimant_name: activeClaim.claimant?.name || null,
             claimant_nim: activeClaim.claimant?.nim || null,
             claimant_prodi: activeClaim.claimant?.prodi || null,

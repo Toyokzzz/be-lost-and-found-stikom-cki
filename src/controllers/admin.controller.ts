@@ -423,6 +423,7 @@ export async function getFODashboardData(req: Request, res: Response, next: Next
           handed_over_at: activeClaim.handed_over_at,
           claimant: activeClaim.claimant,       // Data lengkap pengklaim
         } : null,
+        claims: item.claims, // Menyertakan array klaim lengkap untuk panel FO
         total_claims: item.claims.length,
       };
     });
