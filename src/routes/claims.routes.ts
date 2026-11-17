@@ -12,6 +12,8 @@ router.post('/complete', verifyToken, requireAuth, completeClaim);
 
 // Riwayat klaim yang diajukan oleh user (sebagai pengklaim)
 router.get('/my', verifyToken, requireAuth, getMyClaims);
+router.get('/my-claims', verifyToken, requireAuth, getMyClaims);
+router.get('/user/my', verifyToken, requireAuth, getMyClaims);
 
 // Klaim yang masuk pada barang temuan milik user (sebagai pelapor penemu)
 // Digunakan untuk fitur "barang sudah diklaim" yang dipindah dari admin FO ke user pelapor
