@@ -47,17 +47,18 @@ export function verifyHiddenDetail(actualDetail: string, claimedAnswer: string):
 
   if (!normActual || !normClaimed) return false;
 
+  // 1. Exact match teks lengkap (case-insensitive & tanda baca/spasi dinormalisasi)
+  // Mendukung jawaban singkat 1 karakter (huruf/angka) hingga 20 karakter
+  if (normActual === normClaimed) {
+    return true;
+  }
+
   const actualTokens = tokenizeText(normActual);
   const claimedTokens = tokenizeText(normClaimed);
 
   // Jika input pengguna tidak memiliki kata kunci signifikan (misal hanya kata 'ada', 'dan', 'di')
   if (claimedTokens.size === 0 || actualTokens.size === 0) {
     return false;
-  }
-
-  // 1. Exact match teks lengkap (jika memiliki minimal 1 token signifikan dan panjang >= 5)
-  if (normActual === normClaimed && normClaimed.length >= 5) {
-    return true;
   }
 
   // 2. Token overlap similarity berbasis kata kunci non-stopword

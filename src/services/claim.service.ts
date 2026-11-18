@@ -2,6 +2,11 @@ import { prisma } from '../utils/prisma';
 import { AppError } from '../middlewares/errorHandler';
 import { verifyHiddenDetail } from '../utils/textNormalizer';
 import { generateClaimCode } from '../utils/claimCodeGenerator';
+import {
+  checkClaimAttemptStatus,
+  recordFailedAttempt,
+  recordSuccessfulClaim,
+} from './claimAttempt.service';
 
 /**
  * Memproses verifikasi mandiri klaim barang temuan.
@@ -50,15 +55,34 @@ export async function verifyAndCreateClaim(
     };
   }
 
+  // Periksa batas percobaan (maksimal 3 kali, jeda 60 menit jika 3 kali salah)
+  const attemptStatus = checkClaimAttemptStatus(claimantUserId, foundItemId);
+  if (!attemptStatus.allowed) {
+    throw new AppError(
+      `Percobaan menjawab pertanyaan validasi telah mencapai batas maksimal (3 kali). Sistem memberikan waktu jeda selama 60 menit. Silakan coba lagi dalam ${attemptStatus.lockedMinutesRemaining || 60} menit.`,
+      429
+    );
+  }
+
   // Verifikasi kecocokan ciri rahasia (hidden detail)
   const isMatch = verifyHiddenDetail(item.hidden_detail, claimedAnswer);
 
   if (!isMatch) {
+    const failResult = recordFailedAttempt(claimantUserId, foundItemId);
+    if (failResult.isLocked) {
+      throw new AppError(
+        'Percobaan menjawab pertanyaan validasi telah salah sebanyak 3 kali. Sistem memberikan waktu jeda selama 60 menit sebelum Anda dapat mencoba kembali.',
+        429
+      );
+    }
     throw new AppError(
-      'Ciri rahasia yang Anda berikan belum sesuai dengan catatan penemuan barang. Pastikan deskripsi ciri fisik rahasia spesifik dan akurat.',
+      `Jawaban validasi yang Anda berikan belum sesuai dengan catatan penemuan barang. Kesempatan tersisa: ${failResult.remainingAttempts} kali.`,
       400
     );
   }
+
+  // Jawaban cocok! Reset percobaan salah untuk user dan barang ini
+  recordSuccessfulClaim(claimantUserId, foundItemId);
 
   // Hasilkan Claim Code 6-karakter acak unik
   let claimCode = generateClaimCode();

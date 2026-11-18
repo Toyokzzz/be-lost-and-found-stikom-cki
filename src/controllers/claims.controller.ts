@@ -7,7 +7,10 @@ import { buildPhotoUrl } from '../utils/photoUrl';
 
 const verifyClaimSchema = z.object({
   found_item_id: z.string().uuid('ID barang temuan tidak valid'),
-  answer: z.string().min(3, 'Deskripsi ciri rahasia minimal 3 karakter'),
+  answer: z
+    .string()
+    .min(1, 'Jawaban validasi minimal 1 karakter')
+    .max(20, 'Jawaban validasi maksimal 20 karakter'),
   lost_report_id: z.string().uuid().optional(),
 });
 

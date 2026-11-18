@@ -21,6 +21,15 @@ const alphaStringField = (minLen: number, label: string) =>
       message: `${label} minimal ${minLen} karakter`,
     });
 
+const validationKeyField = z
+  .string()
+  .min(1, 'Kunci jawaban validasi wajib diisi')
+  .max(20, 'Kunci jawaban validasi maksimal 20 karakter')
+  .transform((val) => toAlphaUppercase(val))
+  .refine((val) => val.length >= 1 && val.length <= 20, {
+    message: 'Kunci jawaban validasi harus antara 1 sampai 20 karakter',
+  });
+
 const reportFoundSchema = z.object({
   title: z
     .string()
@@ -36,7 +45,7 @@ const reportFoundSchema = z.object({
     .default('Area Kampus STIKOM CKI')
     .transform((v) => toAlphaUppercase(v) || 'AREA KAMPUS STIKOM CKI'),
   validation_question: alphaStringField(3, 'Pertanyaan validasi'),
-  hidden_detail: alphaStringField(2, 'Kunci jawaban validasi'),
+  hidden_detail: validationKeyField,
 });
 
 const reportLostSchema = z.object({
